@@ -15,18 +15,24 @@
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #f8fafc; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
-        /* This ensures the capture area is rendered fully for html2canvas */
-        #report-capture {
-            position: absolute;
-            left: -9999px;
+        /* Hidden container for perfect sharing */
+        #export-container {
+            position: fixed;
+            left: -5000px;
             top: 0;
-            width: 400px;
-            background: #f8fafc;
+            width: 450px;
+            background: white;
+            padding: 24px;
         }
 
-        @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; }
+        .achieved-badge {
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1e40af;
+            font-weight: 900;
+            font-size: 10px;
+            padding: 2px 10px;
+            border-radius: 99px;
+            border: 1px solid #bfdbfe;
         }
     </style>
 </head>
@@ -42,10 +48,9 @@
             const [loading, setLoading] = useState(false);
             const [isSaved, setIsSaved] = useState(false);
             const [sharing, setSharing] = useState(false);
-            const reportRef = useRef(null);
 
             useEffect(() => {
-                const savedKey = localStorage.getItem('scm_prod_key_v5');
+                const savedKey = localStorage.getItem('scm_prod_v10');
                 if (savedKey) {
                     setApiKey(savedKey);
                     setIsSaved(true);
@@ -54,12 +59,12 @@
 
             const saveKey = () => {
                 if (!apiKey) return;
-                localStorage.setItem('scm_prod_key_v5', apiKey);
+                localStorage.setItem('scm_prod_v10', apiKey);
                 setIsSaved(true);
             };
 
             const clearKey = () => {
-                localStorage.removeItem('scm_prod_key_v5');
+                localStorage.removeItem('scm_prod_v10');
                 setApiKey('');
                 setIsSaved(false);
             };
@@ -79,35 +84,38 @@
 
             const current = data || sampleData;
 
-            // Calculation: 5-Mar => 21 days remaining (26 - dayNum)
+            // Logic: 5-Mar => 21 Days (26 - dayNum)
             const remainingDays = useMemo(() => {
                 const dayMatch = current.reportDate.match(/(\d+)/);
                 const dayNum = dayMatch ? parseInt(dayMatch[0]) : 5;
                 return 26 - dayNum;
             }, [current.reportDate]);
 
-            const shareToWhatsApp = async () => {
+            const shareReport = async () => {
                 if (sharing) return;
                 setSharing(true);
                 
                 try {
-                    // We target the hidden full-length report for the screenshot
-                    const element = document.getElementById('report-capture');
+                    const element = document.getElementById('export-container');
+                    // Force a layout recalculation for the hidden element
+                    element.style.height = 'auto';
+                    
                     const canvas = await html2canvas(element, {
-                        scale: 3, // Very high quality for WhatsApp
+                        scale: 3,
                         useCORS: true,
-                        logging: false,
-                        backgroundColor: '#f8fafc'
+                        backgroundColor: '#ffffff',
+                        windowWidth: 450,
+                        windowHeight: element.scrollHeight
                     });
                     
-                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png', 1.0));
                     const file = new File([blob], `SCM_Report_${current.reportDate}.png`, { type: 'image/png' });
 
                     if (navigator.share) {
                         await navigator.share({
                             files: [file],
                             title: `Production Report - ${current.reportDate}`,
-                            text: `SCM Update: ${current.reportDate}. Remaining Days: ${remainingDays}`
+                            text: `SCM Update: ${current.reportDate}. Days Left: ${remainingDays}`
                         });
                     } else {
                         const url = URL.createObjectURL(blob);
@@ -117,8 +125,7 @@
                         a.click();
                     }
                 } catch (err) {
-                    console.error(err);
-                    alert("Sharing failed. Try taking a normal screenshot.");
+                    alert("Sharing failed. Check permissions.");
                 } finally {
                     setSharing(false);
                 }
@@ -132,7 +139,7 @@
                 reader.onloadend = async () => {
                     const base64 = reader.result.split(',')[1];
                     try {
-                        const prompt = `Extract production data. JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is current date col. 'cumm' is 'Cumm ACH'. Sort strictly: Machining, Supa, FC, FG. Return ONLY JSON.`;
+                        const prompt = `Extract production data. JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is date col. 'cumm' is 'Cumm ACH'. Sort strictly: Machining, Supa, FC, FG. Return ONLY JSON.`;
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -142,46 +149,46 @@
                         const text = result.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
                         setData(JSON.parse(text));
                     } catch (err) {
-                        alert("Error reading table. Please ensure the photo is clear.");
+                        alert("Error reading table. Try a clearer photo.");
                     } finally { setLoading(false); }
                 };
                 reader.readAsDataURL(file);
             };
 
-            // Shared Component for the Cards to ensure consistency
-            const ProductCard = ({ item, isReport = false }) => (
-                <div className={`bg-white rounded-[24px] border border-slate-200 p-4 shadow-sm flex flex-col gap-3 ${isReport ? 'mb-4' : ''}`}>
+            const ProductCard = ({ item }) => (
+                <div className="bg-white rounded-3xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
                     <div className="flex justify-between items-center">
-                        <h3 className="text-[13px] font-black text-slate-800 uppercase tracking-tight">{item.name}</h3>
-                        <div className="px-2 py-0.5 bg-blue-50 rounded-full text-[9px] font-black text-blue-600 uppercase">
+                        <h3 className="text-[13px] font-black text-slate-800 uppercase leading-none">{item.name}</h3>
+                        <div className="achieved-badge uppercase tracking-tighter shrink-0">
                             {((item.cumm / item.plan) * 100).toFixed(1)}% ACHIEVED
                         </div>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                         <div className="flex flex-col">
-                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Plan Target</span>
-                            <span className="text-[14px] font-black text-slate-700 leading-tight">{item.plan.toLocaleString()}</span>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Plan Target</span>
+                            <span className="text-[14px] font-black text-slate-700 leading-none">{item.plan.toLocaleString()}</span>
                         </div>
-                        <div className="flex flex-col border-l border-slate-100 pl-4">
-                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">{current.reportDate} Actual</span>
-                            <span className="text-[14px] font-black text-emerald-600 leading-tight">+{item.daily.toLocaleString()}</span>
+                        <div className="flex flex-col border-l border-slate-100 pl-3">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">{current.reportDate} (Daily)</span>
+                            <span className="text-[14px] font-black text-emerald-600 leading-none">+{item.daily.toLocaleString()}</span>
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[8px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Cumulative Ach.</span>
-                            <span className="text-[14px] font-black text-blue-600 leading-tight">{item.cumm.toLocaleString()}</span>
+                            <span className="text-[9px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Cumulative Ach.</span>
+                            <span className="text-[14px] font-black text-blue-600 leading-none">{item.cumm.toLocaleString()}</span>
                         </div>
-                        <div className="flex flex-col border-l border-slate-100 pl-4">
-                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">MTD Average</span>
-                            <span className="text-[14px] font-black text-slate-700 leading-tight">{item.mtd.toLocaleString()}</span>
-                        </div>
-                        <div className="col-span-2 bg-slate-50 rounded-xl px-3 py-2 flex justify-between items-center border border-slate-100">
-                            <span className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate</span>
-                            <span className="text-[15px] font-black text-orange-600 tracking-tighter">{item.askingRate.toLocaleString()} <span className="text-[8px] uppercase font-bold text-orange-400">u/day</span></span>
+                        <div className="flex flex-col border-l border-slate-100 pl-3">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">MTD Average</span>
+                            <span className="text-[14px] font-black text-slate-700 leading-none">{item.mtd.toLocaleString()}</span>
                         </div>
                     </div>
-                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600 rounded-full" style={{width: `${Math.min((item.cumm/item.plan)*100, 100)}%`}}></div>
+                    
+                    <div className="bg-slate-50 rounded-2xl px-4 py-2.5 flex justify-between items-center border border-slate-100">
+                        <span className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate Required</span>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-[16px] font-black text-orange-600 tracking-tighter">{item.askingRate.toLocaleString()}</span>
+                            <span className="text-[8px] font-black text-orange-400 uppercase">u/day</span>
+                        </div>
                     </div>
                 </div>
             );
@@ -189,12 +196,12 @@
             return (
                 <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl bg-white border-x border-slate-200">
                     
-                    {/* Header (10%) */}
+                    {/* Header */}
                     <header className="px-5 pt-6 pb-3 bg-white border-b border-slate-200 shrink-0 shadow-sm">
                         <div className="flex justify-between items-start">
                             <div className="flex-1 mr-4">
                                 <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none uppercase">{current.title}</h1>
-                                <p className="text-blue-600 text-[10px] font-black mt-1 uppercase tracking-widest leading-none">{current.subTitle}</p>
+                                <p className="text-blue-600 text-[10px] font-black mt-1 uppercase tracking-widest">{current.subTitle}</p>
                                 
                                 <div className="mt-3 flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 ring-blue-500 focus-within:ring-1">
                                     <i data-lucide="key" className={`w-3 h-3 mr-2 ${isSaved ? 'text-emerald-500' : 'text-slate-400'}`}></i>
@@ -212,7 +219,7 @@
                             </div>
 
                             <div className="flex gap-1.5 pt-1">
-                                <button onClick={shareToWhatsApp} className="p-3 bg-emerald-50 rounded-xl active:bg-emerald-100 border border-emerald-100 disabled:opacity-50" disabled={sharing}>
+                                <button onClick={shareReport} className="p-3 bg-emerald-50 rounded-xl active:bg-emerald-100 border border-emerald-100 disabled:opacity-50" disabled={sharing}>
                                     {sharing ? <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div> : <i data-lucide="share-2" className="w-5 h-5 text-emerald-600"></i>}
                                 </button>
                                 <label className={`p-3 rounded-xl shadow-lg transition-all cursor-pointer active:scale-95 ${apiKey ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300 opacity-50'}`}>
@@ -226,24 +233,24 @@
                     {loading ? (
                         <div className="flex-1 flex flex-col items-center justify-center bg-white">
                             <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Analyzing Production Line...</p>
+                            <p className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-widest">Processing Dashboard...</p>
                         </div>
                     ) : (
                         <main className="flex-1 flex flex-col p-3 gap-2 overflow-hidden bg-slate-50">
-                            {/* Summary Bar */}
+                            {/* Stats Bar */}
                             <div className="flex gap-2 shrink-0 h-[8%]">
                                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-4 flex items-center gap-3 shadow-sm">
-                                    <div className="bg-blue-50 p-2 rounded-lg"><i data-lucide="calendar" className="w-4 h-4 text-blue-600"></i></div>
+                                    <div className="bg-blue-50 p-2 rounded-lg text-blue-600"><i data-lucide="calendar" className="w-4 h-4"></i></div>
                                     <div className="flex flex-col leading-none">
                                         <span className="text-[14px] font-black text-slate-900">{current.reportDate}</span>
                                         <span className="text-[8px] font-bold text-slate-400 uppercase mt-1">Status Date</span>
                                     </div>
                                 </div>
                                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-4 flex items-center gap-3 shadow-sm">
-                                    <div className="bg-orange-50 p-2 rounded-lg"><i data-lucide="alert-circle" className="w-4 h-4 text-orange-600"></i></div>
+                                    <div className="bg-orange-50 p-2 rounded-lg text-orange-600"><i data-lucide="alert-circle" className="w-4 h-4"></i></div>
                                     <div className="flex flex-col leading-none">
                                         <span className="text-[14px] font-black text-orange-700">{(current.pendingVisual/1000).toFixed(1)}k</span>
-                                        <span className="text-[8px] font-bold text-orange-400 uppercase mt-1">Pending Packing</span>
+                                        <span className="text-[8px] font-bold text-orange-400 uppercase mt-1">Pending Visual</span>
                                     </div>
                                 </div>
                             </div>
@@ -257,9 +264,9 @@
 
                             {/* Footer */}
                             <div className="h-12 shrink-0 bg-slate-900 rounded-[22px] flex items-center justify-between px-6 text-white shadow-xl">
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
                                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Sync: Active</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Sync Active</span>
                                 </div>
                                 <div className="text-right flex items-center gap-4">
                                     <div className="flex flex-col items-end leading-none">
@@ -272,27 +279,36 @@
                         </main>
                     )}
 
-                    {/* HIDDEN REPORT AREA FOR PERFECT SCREENSHOTS */}
-                    <div id="report-capture" className="p-6">
-                        <div className="mb-6">
-                            <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight leading-none">{current.title}</h1>
-                            <p className="text-blue-600 text-xs font-black mt-2 uppercase tracking-widest">{current.subTitle} - REPORT DATE: {current.reportDate}</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 mb-6">
-                            <div className="bg-white rounded-2xl border p-4">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase">Pending for Packing</span>
-                                <div className="text-xl font-black text-orange-600 mt-1">{current.pendingVisual.toLocaleString()}</div>
-                            </div>
-                            <div className="bg-slate-900 rounded-2xl p-4 text-white">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase">Working Days Remaining</span>
-                                <div className="text-xl font-black mt-1">{remainingDays} Days</div>
+                    {/* HIDDEN MASTER EXPORT AREA (Invisible on screen, but captured by html2canvas) */}
+                    <div id="export-container" className="flex flex-col gap-5">
+                        <div className="border-b-4 border-slate-900 pb-4">
+                            <h1 className="text-3xl font-black text-slate-900 leading-none uppercase">{current.title}</h1>
+                            <div className="flex justify-between items-end mt-4">
+                                <div className="text-blue-600 font-black text-sm uppercase tracking-widest">{current.subTitle}</div>
+                                <div className="text-slate-400 font-black text-xs uppercase italic">Report Date: {current.reportDate}</div>
                             </div>
                         </div>
-                        {current.items.map((item, i) => (
-                            <ProductCard key={i} item={item} isReport={true} />
-                        ))}
-                        <div className="mt-4 pt-4 border-t border-slate-200 text-center">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Generated by Production Insight AI</p>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-slate-50 border-2 border-slate-200 rounded-3xl p-5">
+                                <span className="text-[10px] font-black text-slate-400 uppercase">Current Pending</span>
+                                <div className="text-2xl font-black text-orange-600 mt-1">{current.pendingVisual.toLocaleString()} Units</div>
+                            </div>
+                            <div className="bg-slate-900 rounded-3xl p-5 text-white">
+                                <span className="text-[10px] font-black text-slate-400 uppercase">Working Capacity</span>
+                                <div className="text-2xl font-black mt-1">{remainingDays} Days Left</div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-4">
+                            {current.items.map((item, i) => (
+                                <ProductCard key={i} item={item} />
+                            ))}
+                        </div>
+
+                        <div className="mt-4 pt-6 border-t-2 border-slate-100 flex justify-between items-center opacity-50">
+                            <span className="text-[10px] font-black text-slate-400 uppercase">Generated via Production Insight AI</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">March 2026</span>
                         </div>
                     </div>
                 </div>
