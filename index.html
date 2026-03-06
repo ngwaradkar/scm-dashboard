@@ -15,21 +15,31 @@
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #ffffff; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
-        /* Hidden High-Definition Export Container */
-        #export-root {
+        /* HIDDEN 4K EXPORT ENGINE - Widened to 550px to prevent text clipping */
+        #hd-export-root {
             position: fixed;
             left: -9999px;
             top: 0;
-            width: 420px;
-            background: white;
-            padding: 20px;
+            width: 550px;
+            background: #ffffff;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
         }
 
-        .metric-label { font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: -0.01em; }
-        .metric-value { font-size: 15px; font-weight: 900; color: #1e293b; line-height: 1; }
+        .ach-badge {
+            background: #eff6ff;
+            color: #1e40af;
+            font-weight: 900;
+            font-size: 11px;
+            padding: 4px 12px;
+            border-radius: 99px;
+            border: 1.5px solid #dbeafe;
+        }
     </style>
 </head>
-<body class="overflow-hidden bg-slate-50">
+<body class="overflow-hidden bg-slate-50 text-slate-900">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -43,7 +53,7 @@
             const [sharing, setSharing] = useState(false);
 
             useEffect(() => {
-                const savedKey = localStorage.getItem('scm_prod_v12');
+                const savedKey = localStorage.getItem('scm_prod_v15_hd');
                 if (savedKey) {
                     setApiKey(savedKey);
                     setIsSaved(true);
@@ -52,12 +62,12 @@
 
             const saveKey = () => {
                 if (!apiKey) return;
-                localStorage.setItem('scm_prod_v12', apiKey);
+                localStorage.setItem('scm_prod_v15_hd', apiKey);
                 setIsSaved(true);
             };
 
             const clearKey = () => {
-                localStorage.removeItem('scm_prod_v12');
+                localStorage.removeItem('scm_prod_v15_hd');
                 setApiKey('');
                 setIsSaved(false);
             };
@@ -83,35 +93,40 @@
                 return 26 - dayNum;
             }, [current.reportDate]);
 
-            const handleShare = async () => {
+            const generateShare = async () => {
                 if (sharing) return;
                 setSharing(true);
                 try {
-                    const element = document.getElementById('export-root');
+                    const element = document.getElementById('hd-export-root');
+                    
+                    // html2canvas set to scale 4 for Ultra HD 4K quality
                     const canvas = await html2canvas(element, {
-                        scale: 3,
+                        scale: 4,
                         useCORS: true,
-                        backgroundColor: '#ffffff'
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        width: 550,
+                        height: element.offsetHeight
                     });
                     
-                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                    const file = new File([blob], `SCM_Report_${current.reportDate}.png`, { type: 'image/png' });
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png', 1.0));
+                    const file = new File([blob], `SCM_4K_Report_${current.reportDate}.png`, { type: 'image/png' });
 
                     if (navigator.share) {
                         await navigator.share({
                             files: [file],
-                            title: `Production Report - ${current.reportDate}`,
-                            text: `Update: ${current.reportDate}`
+                            title: `Ultra-HD Production Report - ${current.reportDate}`,
+                            text: `SCM Update: ${current.reportDate} | Days Left: ${daysRemaining}`
                         });
                     } else {
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `Report_${current.reportDate}.png`;
+                        a.download = `SCM_HD_Report_${current.reportDate}.png`;
                         a.click();
                     }
                 } catch (err) {
-                    alert("Share failed. Try again.");
+                    alert("Ultra-HD generation failed. Check your browser permissions.");
                 } finally {
                     setSharing(false);
                 }
@@ -125,7 +140,7 @@
                 reader.onloadend = async () => {
                     const base64 = reader.result.split(',')[1];
                     try {
-                        const prompt = `Extract production data JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is date col. 'cumm' is 'Cumm ACH'. Order strictly: Machining, Supa, FC, FG. Return ONLY JSON.`;
+                        const prompt = `Extract production data JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is date column value. 'cumm' is 'Cumm ACH'. Order strictly: Machining, Supa, FC, FG. Return ONLY valid JSON.`;
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -134,68 +149,69 @@
                         const result = await res.json();
                         const text = result.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
                         setData(JSON.parse(text));
-                    } catch (err) { alert("Error reading image."); } finally { setLoading(false); }
+                    } catch (err) { alert("Data extraction failed. Please use a clearer photo."); } finally { setLoading(false); }
                 };
                 reader.readAsDataURL(file);
             };
 
-            const Card = ({ item }) => (
-                <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm flex flex-col gap-2.5">
+            const ProductCard = ({ item, isExport = false }) => (
+                <div className={`bg-white rounded-[32px] border border-slate-200 p-5 shadow-sm flex flex-col gap-4 ${isExport ? 'w-full' : ''}`}>
                     <div className="flex justify-between items-center">
-                        <h3 className="text-[12px] font-black text-slate-800 uppercase tracking-tight truncate pr-2">{item.name}</h3>
-                        <div className="px-2 py-0.5 bg-blue-50 text-[9px] font-black text-blue-600 rounded-full border border-blue-100 uppercase">
+                        <h3 className={`${isExport ? 'text-[18px]' : 'text-[14px]'} font-black text-slate-800 uppercase tracking-tight`}>{item.name}</h3>
+                        <div className="ach-badge uppercase">
                             {((item.cumm / item.plan) * 100).toFixed(1)}% ACH
                         </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                    
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                         <div className="flex flex-col">
-                            <span className="metric-label">Plan Target</span>
-                            <span className="metric-value">{item.plan.toLocaleString()}</span>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">Plan Target</span>
+                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-slate-700`}>{item.plan.toLocaleString()}</span>
                         </div>
-                        <div className="flex flex-col border-l border-slate-100 pl-3">
-                            <span className="metric-label">{current.reportDate} (Daily)</span>
-                            <span className="metric-value text-emerald-600">+{item.daily.toLocaleString()}</span>
+                        <div className="flex flex-col border-l border-slate-100 pl-6">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">{current.reportDate} Actual</span>
+                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-emerald-600`}>+{item.daily.toLocaleString()}</span>
                         </div>
                         <div className="flex flex-col">
-                            <span className="metric-label text-blue-500">Cumulative Ach.</span>
-                            <span className="metric-value text-blue-600">{item.cumm.toLocaleString()}</span>
+                            <span className="text-[10px] font-bold text-blue-400 uppercase tracking-tighter mb-1">Cumulative Ach.</span>
+                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-blue-600`}>{item.cumm.toLocaleString()}</span>
                         </div>
-                        <div className="flex flex-col border-l border-slate-100 pl-3">
-                            <span className="metric-label">MTD Average</span>
-                            <span className="metric-value">{item.mtd.toLocaleString()}</span>
+                        <div className="flex flex-col border-l border-slate-100 pl-6">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">MTD Average</span>
+                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-slate-700`}>{item.mtd.toLocaleString()}</span>
                         </div>
-                    </div>
-                    <div className="bg-slate-50 rounded-xl px-3 py-2 flex justify-between items-center border border-slate-100">
-                        <span className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate</span>
-                        <div className="flex items-baseline gap-0.5">
-                            <span className="text-[16px] font-black text-orange-600 tracking-tighter leading-none">{item.askingRate.toLocaleString()}</span>
-                            <span className="text-[8px] font-black text-orange-400 uppercase leading-none">u/day</span>
+                        <div className="col-span-2 bg-slate-50 rounded-[20px] px-5 py-3 flex justify-between items-center border border-slate-100 mt-1">
+                            <span className="text-[10px] font-bold text-orange-500 uppercase tracking-tighter font-black">Asking Rate Required</span>
+                            <div className="flex items-baseline gap-1">
+                                <span className={`${isExport ? 'text-[22px]' : 'text-[18px]'} font-black text-orange-600 tracking-tighter leading-none`}>{item.askingRate.toLocaleString()}</span>
+                                <span className="text-[10px] font-black text-orange-400 uppercase">u/day</span>
+                            </div>
                         </div>
                     </div>
                 </div>
             );
 
             return (
-                <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto bg-white border-x border-slate-200">
+                <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto bg-white border-x border-slate-200 shadow-2xl">
                     
-                    {/* Header */}
-                    <header className="px-4 pt-5 pb-3 bg-white border-b border-slate-200 shrink-0">
+                    {/* UI Header */}
+                    <header className="px-5 pt-6 pb-4 bg-white border-b border-slate-200 shrink-0">
                         <div className="flex justify-between items-start">
-                            <div>
+                            <div className="flex-1 mr-4">
                                 <h1 className="text-xl font-black text-slate-900 leading-none uppercase tracking-tighter">{current.title}</h1>
-                                <p className="text-blue-600 text-[10px] font-black mt-1 uppercase tracking-widest">{current.subTitle}</p>
-                                <div className="mt-2 flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 h-7 focus-within:ring-1 ring-blue-500">
-                                    <i data-lucide="key" className={`w-3 h-3 mr-2 ${isSaved ? 'text-emerald-500' : 'text-slate-400'}`}></i>
-                                    <input type="password" placeholder="Key..." className="bg-transparent border-none outline-none text-[10px] w-full" value={apiKey} onChange={(e) => {setApiKey(e.target.value); setIsSaved(false);}} />
-                                    {apiKey && !isSaved && <button onClick={saveKey} className="text-blue-600"><i data-lucide="save" className="w-3.5 h-3.5"></i></button>}
-                                    {isSaved && <button onClick={clearKey} className="text-slate-400"><i data-lucide="trash-2" className="w-3.5 h-3.5"></i></button>}
+                                <p className="text-blue-600 text-[10px] font-black mt-1 uppercase tracking-widest leading-none">{current.subTitle}</p>
+                                <div className="mt-3 flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 h-8 focus-within:ring-1 ring-blue-500 transition-all">
+                                    <i data-lucide="key" className={`w-3.5 h-3.5 mr-2 ${isSaved ? 'text-emerald-500' : 'text-slate-400'}`}></i>
+                                    <input type="password" placeholder="API Key..." className="bg-transparent border-none outline-none text-[10px] w-full" value={apiKey} onChange={(e) => {setApiKey(e.target.value); setIsSaved(false);}} />
+                                    {apiKey && !isSaved && <button onClick={saveKey} className="text-blue-600 px-1 hover:scale-110"><i data-lucide="save" className="w-4 h-4"></i></button>}
+                                    {isSaved && <button onClick={clearKey} className="text-slate-400 px-1 hover:text-red-500 transition-colors"><i data-lucide="trash-2" className="w-4 h-4"></i></button>}
                                 </div>
                             </div>
-                            <div className="flex gap-2 pt-0.5">
-                                <button onClick={handleShare} className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100 active:scale-95 transition-all">
+                            <div className="flex gap-2 pt-1">
+                                <button onClick={generateShare} className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100 active:scale-95 transition-all shadow-sm" disabled={sharing}>
                                     {sharing ? <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div> : <i data-lucide="share-2" className="w-5 h-5"></i>}
                                 </button>
-                                <label className={`p-3 rounded-xl shadow-lg transition-all cursor-pointer active:scale-95 ${apiKey ? 'bg-blue-600' : 'bg-slate-300 opacity-50'}`}>
+                                <label className={`p-3 rounded-2xl shadow-lg transition-all cursor-pointer active:scale-95 ${apiKey ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300 opacity-50 cursor-not-allowed'}`}>
                                     <i data-lucide="camera" className="w-5 h-5 text-white"></i>
                                     <input type="file" className="hidden" onChange={processImage} disabled={!apiKey} />
                                 </label>
@@ -205,66 +221,71 @@
 
                     {loading ? (
                         <div className="flex-1 flex flex-col items-center justify-center bg-white">
-                            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="mt-4 text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Scanning Excel Data...</p>
+                            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            <p className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] animate-pulse">Syncing Factory Ledger...</p>
                         </div>
                     ) : (
                         <main className="flex-1 flex flex-col p-3 gap-2 overflow-hidden bg-slate-50">
-                            {/* Top Status Bar */}
-                            <div className="flex bg-white rounded-xl border border-slate-200 px-4 h-10 items-center justify-between shadow-sm shrink-0">
-                                <div className="flex items-center gap-2">
-                                    <i data-lucide="calendar" className="w-4 h-4 text-blue-600"></i>
-                                    <span className="text-[12px] font-black text-slate-800">{current.reportDate}</span>
+                            <div className="flex bg-white rounded-2xl border border-slate-200 px-4 h-12 items-center justify-between shadow-sm shrink-0">
+                                <div className="flex items-center gap-3">
+                                    <i data-lucide="calendar" className="w-5 h-5 text-blue-600"></i>
+                                    <span className="text-[15px] font-black text-slate-800 tracking-tighter">{current.reportDate}</span>
                                 </div>
-                                <div className="h-4 w-px bg-slate-200"></div>
-                                <div className="flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Live Sync</span>
+                                <div className="h-5 w-px bg-slate-200"></div>
+                                <div className="flex items-center gap-2.5">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.4)]"></div>
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Live Sync</span>
                                 </div>
                             </div>
 
-                            {/* Main List Area */}
                             <div className="flex-1 flex flex-col gap-2 overflow-y-auto no-scrollbar pb-1">
-                                {current.items.map((item, i) => <Card key={i} item={item} />)}
+                                {current.items.map((item, i) => <ProductCard key={i} item={item} />)}
                                 
-                                {/* Bottom Summary Section (Renamed & Resized) */}
-                                <div className="grid grid-cols-2 gap-2 mt-1 shrink-0 pb-4">
-                                    <div className="bg-orange-600 rounded-2xl p-3 flex flex-col justify-center shadow-lg shadow-orange-100 h-[65px]">
-                                        <span className="text-[8px] font-bold text-orange-200 uppercase tracking-tight leading-none">Visual Packing Pending</span>
-                                        <div className="text-[18px] font-black text-white mt-1 leading-none">{current.pendingVisual.toLocaleString()}</div>
+                                {/* Bottom Summary Boxes */}
+                                <div className="grid grid-cols-2 gap-2 mt-1 shrink-0 pb-6">
+                                    <div className="bg-white border-2 border-orange-100 rounded-[28px] p-4 flex flex-col justify-center shadow-sm h-[75px]">
+                                        <span className="text-[9px] font-bold text-orange-400 uppercase tracking-tight leading-none mb-1">Visual Packing Pending</span>
+                                        <div className="text-[20px] font-black text-orange-600 leading-none">{current.pendingVisual.toLocaleString()} <span className="text-[10px]">u</span></div>
                                     </div>
-                                    <div className="bg-slate-900 rounded-2xl p-3 flex flex-col justify-center shadow-lg shadow-slate-200 h-[65px]">
-                                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight leading-none">Remaining Capacity</span>
-                                        <div className="text-[18px] font-black text-white mt-1 leading-none">{daysRemaining} Days Left</div>
+                                    <div className="bg-slate-900 rounded-[28px] p-4 flex flex-col justify-center shadow-xl h-[75px]">
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight leading-none mb-1">Working Days Left</span>
+                                        <div className="text-[20px] font-black text-white leading-none">{daysRemaining} Days</div>
                                     </div>
                                 </div>
                             </div>
                         </main>
                     )}
 
-                    {/* HIDDEN EXPORT TEMPLATE - Optimized for One-Page WhatsApp Sharing */}
-                    <div id="export-root">
-                        <div className="border-b-4 border-slate-900 pb-4 mb-4">
-                            <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">{current.title}</h1>
-                            <div className="flex justify-between items-center mt-3">
-                                <span className="text-blue-600 font-black text-sm uppercase tracking-widest">{current.subTitle}</span>
-                                <span className="text-slate-400 font-bold text-[10px] uppercase">STATUS DATE: {current.reportDate}</span>
+                    {/* HIDDEN 4K EXPORT TEMPLATE - Optimized for Perfect Sharing */}
+                    <div id="hd-export-root">
+                        <div className="border-b-[6px] border-slate-900 pb-6 flex justify-between items-end">
+                            <div>
+                                <h1 className="text-[42px] font-black text-slate-900 uppercase tracking-tighter leading-none">{current.title}</h1>
+                                <p className="text-blue-600 font-black text-[14px] uppercase tracking-[0.3em] mt-2">{current.subTitle}</p>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-[14px] font-black text-slate-400 uppercase tracking-widest italic">STATUS DATE: {current.reportDate}</span>
                             </div>
                         </div>
                         
-                        <div className="flex flex-col gap-3">
-                            {current.items.map((item, i) => <Card key={i} item={item} />)}
+                        <div className="flex flex-col gap-5">
+                            {current.items.map((item, i) => <ProductCard key={i} item={item} isExport={true} />)}
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3 mt-4">
-                            <div className="bg-slate-50 border-2 border-slate-200 rounded-3xl p-5">
-                                <span className="text-[10px] font-black text-slate-400 uppercase">Visual Packing Pending</span>
-                                <div className="text-2xl font-black text-orange-600 mt-1">{current.pendingVisual.toLocaleString()} Units</div>
+                        <div className="grid grid-cols-2 gap-5 pt-2">
+                            <div className="bg-white border-[3px] border-orange-100 rounded-[40px] p-8 flex flex-col justify-center shadow-sm">
+                                <span className="text-[14px] font-black text-orange-400 uppercase mb-2">Visual Packing Pending</span>
+                                <div className="text-[36px] font-black text-orange-600 leading-none">{current.pendingVisual.toLocaleString()} Units</div>
                             </div>
-                            <div className="bg-slate-900 rounded-3xl p-5 text-white">
-                                <span className="text-[10px] font-black text-slate-400 uppercase">Working Days Left</span>
-                                <div className="text-2xl font-black mt-1">{daysRemaining} Days</div>
+                            <div className="bg-slate-900 rounded-[40px] p-8 flex flex-col justify-center shadow-2xl">
+                                <span className="text-[14px] font-black text-slate-500 uppercase mb-2">Remaining Capacity</span>
+                                <div className="text-[36px] font-black text-white leading-none">{daysRemaining} Days Left</div>
                             </div>
+                        </div>
+
+                        <div className="mt-8 pt-8 border-t-[3px] border-slate-100 flex justify-between items-center opacity-40">
+                            <span className="text-[14px] font-black text-slate-400 uppercase tracking-widest leading-none">Production Insight AI v2.5</span>
+                            <span className="text-[14px] font-black text-slate-400 uppercase tracking-[0.4em]">MARCH 2026</span>
                         </div>
                     </div>
                 </div>
