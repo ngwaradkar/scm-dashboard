@@ -9,36 +9,35 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Screenshot Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #f8fafc; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        #capture-area { background-color: #f8fafc; }
         @media print {
             .no-print { display: none !important; }
             body { background: white !important; }
         }
-        .data-card {
-            transition: transform 0.1s ease-in-out;
-        }
-        .data-card:active {
-            transform: scale(0.98);
-        }
     </style>
 </head>
-<body class="bg-slate-50 overflow-hidden">
+<body class="overflow-hidden">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         const App = () => {
             const [apiKey, setApiKey] = useState('');
             const [data, setData] = useState(null);
             const [loading, setLoading] = useState(false);
             const [isSaved, setIsSaved] = useState(false);
+            const [sharing, setSharing] = useState(false);
+            const dashboardRef = useRef(null);
 
             useEffect(() => {
-                const savedKey = localStorage.getItem('scm_prod_key_v3');
+                const savedKey = localStorage.getItem('scm_prod_key_v4');
                 if (savedKey) {
                     setApiKey(savedKey);
                     setIsSaved(true);
@@ -47,17 +46,16 @@
 
             const saveKey = () => {
                 if (!apiKey) return;
-                localStorage.setItem('scm_prod_key_v3', apiKey);
+                localStorage.setItem('scm_prod_key_v4', apiKey);
                 setIsSaved(true);
             };
 
             const clearKey = () => {
-                localStorage.removeItem('scm_prod_key_v3');
+                localStorage.removeItem('scm_prod_key_v4');
                 setApiKey('');
                 setIsSaved(false);
             };
 
-            // Sample data structure now includes Cumulative Achievement
             const sampleData = {
                 title: "PLAN VS ACTUAL",
                 subTitle: "MARCH 2026",
@@ -68,63 +66,89 @@
                     { name: "Bearings To FC", plan: 3118119, daily: 114947, cumm: 317422, mtd: 79356, askingRate: 133367 },
                     { name: "Bearings To FG", plan: 1297073, daily: 80327, cumm: 86519, mtd: 21630, askingRate: 57645 }
                 ],
-                pendingVisual: 118656,
-                workingDays: 25,
-                daysElapsed: 4
+                pendingVisual: 118656
             };
 
             const current = data || sampleData;
 
+            // Logic: 5-Mar = 21 days remaining. Formula: 26 - DayNumber
+            const remainingDays = useMemo(() => {
+                const dayMatch = current.reportDate.match(/(\d+)/);
+                const dayNum = dayMatch ? parseInt(dayMatch[0]) : 5;
+                return 26 - dayNum;
+            }, [current.reportDate]);
+
+            const shareDashboard = async () => {
+                if (!dashboardRef.current) return;
+                setSharing(true);
+                try {
+                    const canvas = await html2canvas(dashboardRef.current, {
+                        scale: 2, // High resolution
+                        useCORS: true,
+                        backgroundColor: '#f8fafc'
+                    });
+                    
+                    canvas.toBlob(async (blob) => {
+                        const file = new File([blob], `SCM_Report_${current.reportDate}.png`, { type: 'image/png' });
+                        
+                        if (navigator.share) {
+                            await navigator.share({
+                                files: [file],
+                                title: `SCM Report - ${current.reportDate}`,
+                                text: `Production Update for ${current.reportDate}. Remaining Days: ${remainingDays}`
+                            });
+                        } else {
+                            // Fallback for browsers without Web Share API
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = `SCM_Report_${current.reportDate}.png`;
+                            link.click();
+                        }
+                    }, 'image/png');
+                } catch (err) {
+                    alert("Error generating screenshot.");
+                } finally {
+                    setSharing(false);
+                }
+            };
+
             const processImage = async (e) => {
                 const file = e.target.files[0];
                 if (!file || !apiKey) return;
-                
                 setLoading(true);
                 const reader = new FileReader();
                 reader.onloadend = async () => {
                     const base64 = reader.result.split(',')[1];
                     try {
-                        const prompt = `
-                            Extract production data from this image. JSON format: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 
-                            Instructions: 
-                            - 'daily' is the date column (e.g. 5-Mar). 
-                            - 'cumm' is the 'Cumm ACH' column. 
-                            - 'mtd' is 'MTD Average'.
-                            - Sort items strictly: Machining, Supa, FC, FG. 
-                            - Return ONLY valid JSON.`;
-                        
+                        const prompt = `Extract production data. JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is current date column. 'cumm' is 'Cumm ACH'. Sort: Machining, Supa, FC, FG. Return ONLY JSON.`;
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/png", data: base64 } }] }]
-                            })
+                            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/png", data: base64 } }] }] })
                         });
-
                         const result = await res.json();
                         const text = result.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
                         setData(JSON.parse(text));
                     } catch (err) {
-                        alert("Error processing image. Ensure the Excel table is clear.");
-                    } finally {
-                        setLoading(false);
-                    }
+                        alert("Error processing image.");
+                    } finally { setLoading(false); }
                 };
                 reader.readAsDataURL(file);
             };
 
             return (
-                <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl bg-white border-x border-slate-200">
+                <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl bg-white border-x border-slate-200" id="capture-area" ref={dashboardRef}>
                     
-                    {/* Compact Header (9%) */}
-                    <header className="px-5 pt-5 pb-3 bg-white border-b border-slate-100 shrink-0 shadow-sm no-print">
+                    {/* Header (10%) */}
+                    <header className="px-5 pt-6 pb-3 bg-white border-b border-slate-100 shrink-0 shadow-sm no-print">
                         <div className="flex justify-between items-start">
                             <div className="flex-1 mr-4">
                                 <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none uppercase">{current.title}</h1>
                                 <p className="text-blue-600 text-[10px] font-black mt-1 uppercase tracking-widest leading-none">{current.subTitle}</p>
                                 
                                 <div className="mt-3 flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 ring-blue-500 focus-within:ring-1">
-                                    <i data-lucide="key" class={`w-3 h-3 mr-2 ${isSaved ? 'text-emerald-500' : 'text-slate-400'}`}></i>
+                                    <i data-lucide="key" className={`w-3 h-3 mr-2 ${isSaved ? 'text-emerald-500' : 'text-slate-400'}`}></i>
                                     <input 
                                         type="password" 
                                         placeholder="API Key..." 
@@ -133,20 +157,17 @@
                                         onChange={(e) => {setApiKey(e.target.value); setIsSaved(false);}}
                                     />
                                     {apiKey && !isSaved && (
-                                        <button onClick={saveKey} className="text-blue-600 px-1"><i data-lucide="save" class="w-3.5 h-3.5"></i></button>
-                                    )}
-                                    {isSaved && (
-                                        <button onClick={clearKey} className="text-slate-400 px-1"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                                        <button onClick={saveKey} className="text-blue-600 px-1"><i data-lucide="save" className="w-3.5 h-3.5"></i></button>
                                     )}
                                 </div>
                             </div>
 
                             <div className="flex gap-1.5 pt-1">
-                                <button onClick={() => window.print()} className="p-2.5 bg-slate-100 rounded-xl active:bg-slate-200">
-                                    <i data-lucide="file-down" class="w-5 h-5 text-slate-600"></i>
+                                <button onClick={shareDashboard} className="p-2.5 bg-emerald-50 rounded-xl active:bg-emerald-100 border border-emerald-100" disabled={sharing}>
+                                    {sharing ? <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div> : <i data-lucide="share-2" className="w-5 h-5 text-emerald-600"></i>}
                                 </button>
                                 <label className={`p-2.5 rounded-xl shadow-lg transition-all cursor-pointer active:scale-95 ${apiKey ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300 opacity-50'}`}>
-                                    <i data-lucide="camera" class="w-5 h-5 text-white"></i>
+                                    <i data-lucide="camera" className="w-5 h-5 text-white"></i>
                                     <input type="file" className="hidden" onChange={processImage} disabled={!apiKey} />
                                 </label>
                             </div>
@@ -156,47 +177,41 @@
                     {loading ? (
                         <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white">
                             <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Syncing Production Data...</p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse tracking-widest">Processing Dashboard...</p>
                         </div>
                     ) : (
                         <main className="flex-1 flex flex-col p-3 gap-2 overflow-hidden bg-slate-50 no-scrollbar">
                             
-                            {/* Date & Global Metrics Row (8%) */}
+                            {/* Date & Global Metrics Row */}
                             <div className="flex gap-2 shrink-0 h-[8%]">
                                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-3.5 flex items-center gap-2.5 shadow-sm">
-                                    <div className="bg-blue-50 p-1.5 rounded-lg">
-                                        <i data-lucide="calendar" class="w-4 h-4 text-blue-600"></i>
-                                    </div>
+                                    <div className="bg-blue-50 p-1.5 rounded-lg"><i data-lucide="calendar" className="w-4 h-4 text-blue-600"></i></div>
                                     <div className="flex flex-col leading-none">
                                         <span className="text-[13px] font-black text-slate-900 tracking-tighter">{current.reportDate}</span>
                                         <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mt-1">Status Date</span>
                                     </div>
                                 </div>
                                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-3.5 flex items-center gap-2.5 shadow-sm">
-                                    <div className="bg-orange-50 p-1.5 rounded-lg">
-                                        <i data-lucide="alert-circle" class="w-4 h-4 text-orange-600"></i>
-                                    </div>
+                                    <div className="bg-orange-50 p-1.5 rounded-lg"><i data-lucide="alert-circle" className="w-4 h-4 text-orange-600"></i></div>
                                     <div className="flex flex-col leading-none">
                                         <span className="text-[13px] font-black text-orange-700 tracking-tighter">{(current.pendingVisual/1000).toFixed(1)}k</span>
-                                        <span className="text-[8px] font-bold text-orange-400 uppercase tracking-tighter mt-1">Pending Packing</span>
+                                        <span className="text-[8px] font-bold text-orange-400 uppercase tracking-tighter mt-1">Pending Visual</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Data Grid Section (74%) */}
+                            {/* Data Grid */}
                             <div className="flex-1 flex flex-col gap-2 overflow-y-auto no-scrollbar pb-1">
                                 {current.items.map((item, i) => (
-                                    <div key={i} className="bg-white rounded-[24px] border border-slate-200 p-3.5 shadow-sm flex flex-col gap-2.5 data-card">
+                                    <div key={i} className="bg-white rounded-[24px] border border-slate-200 p-3.5 shadow-sm flex flex-col gap-2.5">
                                         <div className="flex justify-between items-center">
                                            <h3 className="text-[12px] font-black text-slate-800 uppercase tracking-tight">{item.name}</h3>
-                                           <div className="px-2 py-0.5 bg-blue-50 rounded-full text-[9px] font-black text-blue-600">
+                                           <div className="px-2 py-0.5 bg-blue-50 rounded-full text-[9px] font-black text-blue-600 uppercase">
                                                {((item.cumm / item.plan) * 100).toFixed(1)}% ACHIEVED
                                            </div>
                                         </div>
                                         
-                                        {/* 3-Row Data Matrix for High Density */}
                                         <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-                                            {/* Row 1: Plan & Today's Actual */}
                                             <div className="flex flex-col">
                                                 <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Plan Target</span>
                                                 <span className="text-[13px] font-black text-slate-700 leading-tight">{item.plan.toLocaleString()}</span>
@@ -205,43 +220,35 @@
                                                 <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">{current.reportDate} (Daily)</span>
                                                 <span className="text-[13px] font-black text-emerald-600 leading-tight">+{item.daily.toLocaleString()}</span>
                                             </div>
-
-                                            {/* Row 2: Cumulative & MTD Average */}
                                             <div className="flex flex-col">
-                                                <span className="text-[8px] font-bold text-blue-400 uppercase tracking-tighter mb-0.5">Cumulative Achieved</span>
+                                                <span className="text-[8px] font-bold text-blue-400 uppercase tracking-tighter mb-0.5">Cumulative Ach.</span>
                                                 <span className="text-[13px] font-black text-blue-600 leading-tight">{item.cumm.toLocaleString()}</span>
                                             </div>
                                             <div className="flex flex-col border-l border-slate-100 pl-4">
                                                 <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">MTD Average</span>
                                                 <span className="text-[13px] font-black text-slate-700 leading-tight">{item.mtd.toLocaleString()}</span>
                                             </div>
-
-                                            {/* Row 3: Asking Rate (Wide) */}
                                             <div className="col-span-2 bg-slate-50/80 rounded-xl px-3 py-1.5 flex justify-between items-center border border-slate-100">
-                                                <span className="text-[8px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate (Required)</span>
-                                                <span className="text-[14px] font-black text-orange-600 tracking-tighter">{item.askingRate.toLocaleString()} <span className="text-[8px]">u/day</span></span>
+                                                <span className="text-[8px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate</span>
+                                                <span className="text-[14px] font-black text-orange-600 tracking-tighter">{item.askingRate.toLocaleString()} <span className="text-[8px] uppercase">u/day</span></span>
                                             </div>
-                                        </div>
-
-                                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                            <div className="h-full bg-blue-600 rounded-full" style={{width: `${Math.min((item.cumm/item.plan)*100, 100)}%`}}></div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
 
-                            {/* Minimal Footer (9%) */}
+                            {/* Dynamic Footer (9%) */}
                             <div className="h-12 shrink-0 bg-slate-900 rounded-[22px] flex items-center justify-between px-6 text-white no-print">
                                 <div className="flex items-center gap-2.5">
                                     <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Sync: Active</span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 tracking-widest">Dashboard Active</span>
                                 </div>
                                 <div className="text-right flex items-center gap-3">
                                     <div className="flex flex-col items-end leading-none">
-                                        <span className="text-[13px] font-black text-white uppercase tracking-tighter">22 Days</span>
+                                        <span className="text-[13px] font-black text-white uppercase tracking-tighter">{remainingDays} Days</span>
                                         <span className="text-[7px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">Remaining</span>
                                     </div>
-                                    <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-slate-500"></i>
+                                    <i data-lucide="chevron-right" className="w-3.5 h-3.5 text-slate-500"></i>
                                 </div>
                             </div>
                         </main>
@@ -252,8 +259,6 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-
-        // Refresh icons after render
         setTimeout(() => lucide.createIcons(), 500);
     </script>
 </body>
