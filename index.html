@@ -15,17 +15,17 @@
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #ffffff; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
-        /* HIDDEN 4K EXPORT ENGINE - Widened to 550px to prevent text clipping */
+        /* HIDDEN EXPORT ENGINE - Compact & High-Res */
         #hd-export-root {
             position: fixed;
             left: -9999px;
             top: 0;
-            width: 550px;
+            width: 500px; /* Slightly narrower for better mobile fit */
             background: #ffffff;
-            padding: 40px;
+            padding: 24px; /* Reduced padding */
             display: flex;
             flex-direction: column;
-            gap: 24px;
+            gap: 16px; /* Reduced gaps */
         }
 
         .ach-badge {
@@ -53,7 +53,7 @@
             const [sharing, setSharing] = useState(false);
 
             useEffect(() => {
-                const savedKey = localStorage.getItem('scm_prod_v15_hd');
+                const savedKey = localStorage.getItem('scm_prod_v16_hd');
                 if (savedKey) {
                     setApiKey(savedKey);
                     setIsSaved(true);
@@ -62,12 +62,12 @@
 
             const saveKey = () => {
                 if (!apiKey) return;
-                localStorage.setItem('scm_prod_v15_hd', apiKey);
+                localStorage.setItem('scm_prod_v16_hd', apiKey);
                 setIsSaved(true);
             };
 
             const clearKey = () => {
-                localStorage.removeItem('scm_prod_v15_hd');
+                localStorage.removeItem('scm_prod_v16_hd');
                 setApiKey('');
                 setIsSaved(false);
             };
@@ -99,34 +99,38 @@
                 try {
                     const element = document.getElementById('hd-export-root');
                     
-                    // html2canvas set to scale 4 for Ultra HD 4K quality
+                    // Improved html2canvas configuration for clarity
                     const canvas = await html2canvas(element, {
-                        scale: 4,
+                        scale: 3, // High resolution, but more stable than 4
                         useCORS: true,
+                        allowTaint: true,
                         backgroundColor: '#ffffff',
                         logging: false,
-                        width: 550,
-                        height: element.offsetHeight
+                        width: element.scrollWidth,
+                        height: element.scrollHeight,
+                        windowWidth: element.scrollWidth,
+                        windowHeight: element.scrollHeight
                     });
                     
                     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png', 1.0));
-                    const file = new File([blob], `SCM_4K_Report_${current.reportDate}.png`, { type: 'image/png' });
+                    const file = new File([blob], `SCM_Report_${current.reportDate}.png`, { type: 'image/png' });
 
                     if (navigator.share) {
                         await navigator.share({
                             files: [file],
-                            title: `Ultra-HD Production Report - ${current.reportDate}`,
+                            title: `Production Report - ${current.reportDate}`,
                             text: `SCM Update: ${current.reportDate} | Days Left: ${daysRemaining}`
                         });
                     } else {
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
-                        a.download = `SCM_HD_Report_${current.reportDate}.png`;
+                        a.download = `SCM_Report_${current.reportDate}.png`;
                         a.click();
                     }
                 } catch (err) {
-                    alert("Ultra-HD generation failed. Check your browser permissions.");
+                    console.error(err);
+                    alert("Share generation failed. Please try again.");
                 } finally {
                     setSharing(false);
                 }
@@ -155,9 +159,9 @@
             };
 
             const ProductCard = ({ item, isExport = false }) => (
-                <div className={`bg-white rounded-[32px] border border-slate-200 p-5 shadow-sm flex flex-col gap-4 ${isExport ? 'w-full' : ''}`}>
+                <div className={`bg-white rounded-[24px] border border-slate-200 p-5 shadow-sm flex flex-col gap-4 ${isExport ? 'w-full' : ''}`}>
                     <div className="flex justify-between items-center">
-                        <h3 className={`${isExport ? 'text-[18px]' : 'text-[14px]'} font-black text-slate-800 uppercase tracking-tight`}>{item.name}</h3>
+                        <h3 className={`${isExport ? 'text-[16px]' : 'text-[14px]'} font-black text-slate-800 uppercase tracking-tight`}>{item.name}</h3>
                         <div className="ach-badge uppercase">
                             {((item.cumm / item.plan) * 100).toFixed(1)}% ACH
                         </div>
@@ -166,24 +170,24 @@
                     <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                         <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">Plan Target</span>
-                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-slate-700`}>{item.plan.toLocaleString()}</span>
+                            <span className={`${isExport ? 'text-[18px]' : 'text-[16px]'} font-black text-slate-700`}>{item.plan.toLocaleString()}</span>
                         </div>
                         <div className="flex flex-col border-l border-slate-100 pl-6">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">{current.reportDate} Actual</span>
-                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-emerald-600`}>+{item.daily.toLocaleString()}</span>
+                            <span className={`${isExport ? 'text-[18px]' : 'text-[16px]'} font-black text-emerald-600`}>+{item.daily.toLocaleString()}</span>
                         </div>
                         <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-blue-400 uppercase tracking-tighter mb-1">Cumulative Ach.</span>
-                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-blue-600`}>{item.cumm.toLocaleString()}</span>
+                            <span className={`${isExport ? 'text-[18px]' : 'text-[16px]'} font-black text-blue-600`}>{item.cumm.toLocaleString()}</span>
                         </div>
                         <div className="flex flex-col border-l border-slate-100 pl-6">
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">MTD Average</span>
-                            <span className={`${isExport ? 'text-[20px]' : 'text-[16px]'} font-black text-slate-700`}>{item.mtd.toLocaleString()}</span>
+                            <span className={`${isExport ? 'text-[18px]' : 'text-[16px]'} font-black text-slate-700`}>{item.mtd.toLocaleString()}</span>
                         </div>
                         <div className="col-span-2 bg-slate-50 rounded-[20px] px-5 py-3 flex justify-between items-center border border-slate-100 mt-1">
                             <span className="text-[10px] font-bold text-orange-500 uppercase tracking-tighter font-black">Asking Rate Required</span>
                             <div className="flex items-baseline gap-1">
-                                <span className={`${isExport ? 'text-[22px]' : 'text-[18px]'} font-black text-orange-600 tracking-tighter leading-none`}>{item.askingRate.toLocaleString()}</span>
+                                <span className={`${isExport ? 'text-[20px]' : 'text-[18px]'} font-black text-orange-600 tracking-tighter leading-none`}>{item.askingRate.toLocaleString()}</span>
                                 <span className="text-[10px] font-black text-orange-400 uppercase">u/day</span>
                             </div>
                         </div>
@@ -256,36 +260,31 @@
                         </main>
                     )}
 
-                    {/* HIDDEN 4K EXPORT TEMPLATE - Optimized for Perfect Sharing */}
+                    {/* HIDDEN EXPORT TEMPLATE - Compact & High-Res */}
                     <div id="hd-export-root">
-                        <div className="border-b-[6px] border-slate-900 pb-6 flex justify-between items-end">
+                        <div className="border-b-[4px] border-slate-900 pb-4 flex justify-between items-end">
                             <div>
-                                <h1 className="text-[42px] font-black text-slate-900 uppercase tracking-tighter leading-none">{current.title}</h1>
-                                <p className="text-blue-600 font-black text-[14px] uppercase tracking-[0.3em] mt-2">{current.subTitle}</p>
+                                <h1 className="text-[32px] font-black text-slate-900 uppercase tracking-tighter leading-none">{current.title}</h1>
+                                <p className="text-blue-600 font-black text-[12px] uppercase tracking-[0.3em] mt-1">{current.subTitle}</p>
                             </div>
                             <div className="text-right">
-                                <span className="text-[14px] font-black text-slate-400 uppercase tracking-widest italic">STATUS DATE: {current.reportDate}</span>
+                                <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest italic">STATUS: {current.reportDate}</span>
                             </div>
                         </div>
                         
-                        <div className="flex flex-col gap-5">
+                        <div className="flex flex-col gap-4">
                             {current.items.map((item, i) => <ProductCard key={i} item={item} isExport={true} />)}
                         </div>
 
-                        <div className="grid grid-cols-2 gap-5 pt-2">
-                            <div className="bg-white border-[3px] border-orange-100 rounded-[40px] p-8 flex flex-col justify-center shadow-sm">
-                                <span className="text-[14px] font-black text-orange-400 uppercase mb-2">Visual Packing Pending</span>
-                                <div className="text-[36px] font-black text-orange-600 leading-none">{current.pendingVisual.toLocaleString()} Units</div>
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                            <div className="bg-white border-[3px] border-orange-100 rounded-[32px] p-6 flex flex-col justify-center shadow-sm">
+                                <span className="text-[12px] font-black text-orange-400 uppercase mb-1">Visual Packing Pending</span>
+                                <div className="text-[28px] font-black text-orange-600 leading-none">{current.pendingVisual.toLocaleString()} Units</div>
                             </div>
-                            <div className="bg-slate-900 rounded-[40px] p-8 flex flex-col justify-center shadow-2xl">
-                                <span className="text-[14px] font-black text-slate-500 uppercase mb-2">Remaining Capacity</span>
-                                <div className="text-[36px] font-black text-white leading-none">{daysRemaining} Days Left</div>
+                            <div className="bg-slate-900 rounded-[32px] p-6 flex flex-col justify-center shadow-2xl">
+                                <span className="text-[12px] font-black text-slate-500 uppercase mb-1">Remaining Capacity</span>
+                                <div className="text-[28px] font-black text-white leading-none">{daysRemaining} Days Left</div>
                             </div>
-                        </div>
-
-                        <div className="mt-8 pt-8 border-t-[3px] border-slate-100 flex justify-between items-center opacity-40">
-                            <span className="text-[14px] font-black text-slate-400 uppercase tracking-widest leading-none">Production Insight AI v2.5</span>
-                            <span className="text-[14px] font-black text-slate-400 uppercase tracking-[0.4em]">MARCH 2026</span>
                         </div>
                     </div>
                 </div>
