@@ -9,20 +9,28 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Screenshot Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #f8fafc; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        #capture-area { background-color: #f8fafc; }
+        
+        /* This ensures the capture area is rendered fully for html2canvas */
+        #report-capture {
+            position: absolute;
+            left: -9999px;
+            top: 0;
+            width: 400px;
+            background: #f8fafc;
+        }
+
         @media print {
             .no-print { display: none !important; }
             body { background: white !important; }
         }
     </style>
 </head>
-<body class="overflow-hidden">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
@@ -34,10 +42,10 @@
             const [loading, setLoading] = useState(false);
             const [isSaved, setIsSaved] = useState(false);
             const [sharing, setSharing] = useState(false);
-            const dashboardRef = useRef(null);
+            const reportRef = useRef(null);
 
             useEffect(() => {
-                const savedKey = localStorage.getItem('scm_prod_key_v4');
+                const savedKey = localStorage.getItem('scm_prod_key_v5');
                 if (savedKey) {
                     setApiKey(savedKey);
                     setIsSaved(true);
@@ -46,12 +54,12 @@
 
             const saveKey = () => {
                 if (!apiKey) return;
-                localStorage.setItem('scm_prod_key_v4', apiKey);
+                localStorage.setItem('scm_prod_key_v5', apiKey);
                 setIsSaved(true);
             };
 
             const clearKey = () => {
-                localStorage.removeItem('scm_prod_key_v4');
+                localStorage.removeItem('scm_prod_key_v5');
                 setApiKey('');
                 setIsSaved(false);
             };
@@ -71,43 +79,46 @@
 
             const current = data || sampleData;
 
-            // Logic: 5-Mar = 21 days remaining. Formula: 26 - DayNumber
+            // Calculation: 5-Mar => 21 days remaining (26 - dayNum)
             const remainingDays = useMemo(() => {
                 const dayMatch = current.reportDate.match(/(\d+)/);
                 const dayNum = dayMatch ? parseInt(dayMatch[0]) : 5;
                 return 26 - dayNum;
             }, [current.reportDate]);
 
-            const shareDashboard = async () => {
-                if (!dashboardRef.current) return;
+            const shareToWhatsApp = async () => {
+                if (sharing) return;
                 setSharing(true);
+                
                 try {
-                    const canvas = await html2canvas(dashboardRef.current, {
-                        scale: 2, // High resolution
+                    // We target the hidden full-length report for the screenshot
+                    const element = document.getElementById('report-capture');
+                    const canvas = await html2canvas(element, {
+                        scale: 3, // Very high quality for WhatsApp
                         useCORS: true,
+                        logging: false,
                         backgroundColor: '#f8fafc'
                     });
                     
-                    canvas.toBlob(async (blob) => {
-                        const file = new File([blob], `SCM_Report_${current.reportDate}.png`, { type: 'image/png' });
-                        
-                        if (navigator.share) {
-                            await navigator.share({
-                                files: [file],
-                                title: `SCM Report - ${current.reportDate}`,
-                                text: `Production Update for ${current.reportDate}. Remaining Days: ${remainingDays}`
-                            });
-                        } else {
-                            // Fallback for browsers without Web Share API
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement('a');
-                            link.href = url;
-                            link.download = `SCM_Report_${current.reportDate}.png`;
-                            link.click();
-                        }
-                    }, 'image/png');
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    const file = new File([blob], `SCM_Report_${current.reportDate}.png`, { type: 'image/png' });
+
+                    if (navigator.share) {
+                        await navigator.share({
+                            files: [file],
+                            title: `Production Report - ${current.reportDate}`,
+                            text: `SCM Update: ${current.reportDate}. Remaining Days: ${remainingDays}`
+                        });
+                    } else {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Report_${current.reportDate}.png`;
+                        a.click();
+                    }
                 } catch (err) {
-                    alert("Error generating screenshot.");
+                    console.error(err);
+                    alert("Sharing failed. Try taking a normal screenshot.");
                 } finally {
                     setSharing(false);
                 }
@@ -121,7 +132,7 @@
                 reader.onloadend = async () => {
                     const base64 = reader.result.split(',')[1];
                     try {
-                        const prompt = `Extract production data. JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is current date column. 'cumm' is 'Cumm ACH'. Sort: Machining, Supa, FC, FG. Return ONLY JSON.`;
+                        const prompt = `Extract production data. JSON: {reportDate, items:[{name, plan, daily, cumm, mtd, askingRate}], pendingVisual}. 'daily' is current date col. 'cumm' is 'Cumm ACH'. Sort strictly: Machining, Supa, FC, FG. Return ONLY JSON.`;
                         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -131,17 +142,55 @@
                         const text = result.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
                         setData(JSON.parse(text));
                     } catch (err) {
-                        alert("Error processing image.");
+                        alert("Error reading table. Please ensure the photo is clear.");
                     } finally { setLoading(false); }
                 };
                 reader.readAsDataURL(file);
             };
 
+            // Shared Component for the Cards to ensure consistency
+            const ProductCard = ({ item, isReport = false }) => (
+                <div className={`bg-white rounded-[24px] border border-slate-200 p-4 shadow-sm flex flex-col gap-3 ${isReport ? 'mb-4' : ''}`}>
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-[13px] font-black text-slate-800 uppercase tracking-tight">{item.name}</h3>
+                        <div className="px-2 py-0.5 bg-blue-50 rounded-full text-[9px] font-black text-blue-600 uppercase">
+                            {((item.cumm / item.plan) * 100).toFixed(1)}% ACHIEVED
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                        <div className="flex flex-col">
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Plan Target</span>
+                            <span className="text-[14px] font-black text-slate-700 leading-tight">{item.plan.toLocaleString()}</span>
+                        </div>
+                        <div className="flex flex-col border-l border-slate-100 pl-4">
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">{current.reportDate} Actual</span>
+                            <span className="text-[14px] font-black text-emerald-600 leading-tight">+{item.daily.toLocaleString()}</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[8px] font-bold text-blue-500 uppercase tracking-tighter mb-0.5">Cumulative Ach.</span>
+                            <span className="text-[14px] font-black text-blue-600 leading-tight">{item.cumm.toLocaleString()}</span>
+                        </div>
+                        <div className="flex flex-col border-l border-slate-100 pl-4">
+                            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">MTD Average</span>
+                            <span className="text-[14px] font-black text-slate-700 leading-tight">{item.mtd.toLocaleString()}</span>
+                        </div>
+                        <div className="col-span-2 bg-slate-50 rounded-xl px-3 py-2 flex justify-between items-center border border-slate-100">
+                            <span className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate</span>
+                            <span className="text-[15px] font-black text-orange-600 tracking-tighter">{item.askingRate.toLocaleString()} <span className="text-[8px] uppercase font-bold text-orange-400">u/day</span></span>
+                        </div>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-600 rounded-full" style={{width: `${Math.min((item.cumm/item.plan)*100, 100)}%`}}></div>
+                    </div>
+                </div>
+            );
+
             return (
-                <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl bg-white border-x border-slate-200" id="capture-area" ref={dashboardRef}>
+                <div className="h-screen flex flex-col overflow-hidden max-w-md mx-auto shadow-2xl bg-white border-x border-slate-200">
                     
                     {/* Header (10%) */}
-                    <header className="px-5 pt-6 pb-3 bg-white border-b border-slate-100 shrink-0 shadow-sm no-print">
+                    <header className="px-5 pt-6 pb-3 bg-white border-b border-slate-200 shrink-0 shadow-sm">
                         <div className="flex justify-between items-start">
                             <div className="flex-1 mr-4">
                                 <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none uppercase">{current.title}</h1>
@@ -163,10 +212,10 @@
                             </div>
 
                             <div className="flex gap-1.5 pt-1">
-                                <button onClick={shareDashboard} className="p-2.5 bg-emerald-50 rounded-xl active:bg-emerald-100 border border-emerald-100" disabled={sharing}>
+                                <button onClick={shareToWhatsApp} className="p-3 bg-emerald-50 rounded-xl active:bg-emerald-100 border border-emerald-100 disabled:opacity-50" disabled={sharing}>
                                     {sharing ? <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div> : <i data-lucide="share-2" className="w-5 h-5 text-emerald-600"></i>}
                                 </button>
-                                <label className={`p-2.5 rounded-xl shadow-lg transition-all cursor-pointer active:scale-95 ${apiKey ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300 opacity-50'}`}>
+                                <label className={`p-3 rounded-xl shadow-lg transition-all cursor-pointer active:scale-95 ${apiKey ? 'bg-blue-600 shadow-blue-200' : 'bg-slate-300 opacity-50'}`}>
                                     <i data-lucide="camera" className="w-5 h-5 text-white"></i>
                                     <input type="file" className="hidden" onChange={processImage} disabled={!apiKey} />
                                 </label>
@@ -175,84 +224,77 @@
                     </header>
 
                     {loading ? (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 bg-white">
-                            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse tracking-widest">Processing Dashboard...</p>
+                        <div className="flex-1 flex flex-col items-center justify-center bg-white">
+                            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            <p className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Analyzing Production Line...</p>
                         </div>
                     ) : (
-                        <main className="flex-1 flex flex-col p-3 gap-2 overflow-hidden bg-slate-50 no-scrollbar">
-                            
-                            {/* Date & Global Metrics Row */}
+                        <main className="flex-1 flex flex-col p-3 gap-2 overflow-hidden bg-slate-50">
+                            {/* Summary Bar */}
                             <div className="flex gap-2 shrink-0 h-[8%]">
-                                <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-3.5 flex items-center gap-2.5 shadow-sm">
-                                    <div className="bg-blue-50 p-1.5 rounded-lg"><i data-lucide="calendar" className="w-4 h-4 text-blue-600"></i></div>
+                                <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-4 flex items-center gap-3 shadow-sm">
+                                    <div className="bg-blue-50 p-2 rounded-lg"><i data-lucide="calendar" className="w-4 h-4 text-blue-600"></i></div>
                                     <div className="flex flex-col leading-none">
-                                        <span className="text-[13px] font-black text-slate-900 tracking-tighter">{current.reportDate}</span>
-                                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mt-1">Status Date</span>
+                                        <span className="text-[14px] font-black text-slate-900">{current.reportDate}</span>
+                                        <span className="text-[8px] font-bold text-slate-400 uppercase mt-1">Status Date</span>
                                     </div>
                                 </div>
-                                <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-3.5 flex items-center gap-2.5 shadow-sm">
-                                    <div className="bg-orange-50 p-1.5 rounded-lg"><i data-lucide="alert-circle" className="w-4 h-4 text-orange-600"></i></div>
+                                <div className="flex-1 bg-white rounded-2xl border border-slate-200 px-4 flex items-center gap-3 shadow-sm">
+                                    <div className="bg-orange-50 p-2 rounded-lg"><i data-lucide="alert-circle" className="w-4 h-4 text-orange-600"></i></div>
                                     <div className="flex flex-col leading-none">
-                                        <span className="text-[13px] font-black text-orange-700 tracking-tighter">{(current.pendingVisual/1000).toFixed(1)}k</span>
-                                        <span className="text-[8px] font-bold text-orange-400 uppercase tracking-tighter mt-1">Pending Visual</span>
+                                        <span className="text-[14px] font-black text-orange-700">{(current.pendingVisual/1000).toFixed(1)}k</span>
+                                        <span className="text-[8px] font-bold text-orange-400 uppercase mt-1">Pending Packing</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Data Grid */}
-                            <div className="flex-1 flex flex-col gap-2 overflow-y-auto no-scrollbar pb-1">
+                            {/* Main List */}
+                            <div className="flex-1 flex flex-col gap-2 overflow-y-auto no-scrollbar pb-2">
                                 {current.items.map((item, i) => (
-                                    <div key={i} className="bg-white rounded-[24px] border border-slate-200 p-3.5 shadow-sm flex flex-col gap-2.5">
-                                        <div className="flex justify-between items-center">
-                                           <h3 className="text-[12px] font-black text-slate-800 uppercase tracking-tight">{item.name}</h3>
-                                           <div className="px-2 py-0.5 bg-blue-50 rounded-full text-[9px] font-black text-blue-600 uppercase">
-                                               {((item.cumm / item.plan) * 100).toFixed(1)}% ACHIEVED
-                                           </div>
-                                        </div>
-                                        
-                                        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
-                                            <div className="flex flex-col">
-                                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">Plan Target</span>
-                                                <span className="text-[13px] font-black text-slate-700 leading-tight">{item.plan.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex flex-col border-l border-slate-100 pl-4">
-                                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">{current.reportDate} (Daily)</span>
-                                                <span className="text-[13px] font-black text-emerald-600 leading-tight">+{item.daily.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <span className="text-[8px] font-bold text-blue-400 uppercase tracking-tighter mb-0.5">Cumulative Ach.</span>
-                                                <span className="text-[13px] font-black text-blue-600 leading-tight">{item.cumm.toLocaleString()}</span>
-                                            </div>
-                                            <div className="flex flex-col border-l border-slate-100 pl-4">
-                                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter mb-0.5">MTD Average</span>
-                                                <span className="text-[13px] font-black text-slate-700 leading-tight">{item.mtd.toLocaleString()}</span>
-                                            </div>
-                                            <div className="col-span-2 bg-slate-50/80 rounded-xl px-3 py-1.5 flex justify-between items-center border border-slate-100">
-                                                <span className="text-[8px] font-bold text-orange-500 uppercase tracking-tighter">Asking Rate</span>
-                                                <span className="text-[14px] font-black text-orange-600 tracking-tighter">{item.askingRate.toLocaleString()} <span className="text-[8px] uppercase">u/day</span></span>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    <ProductCard key={i} item={item} />
                                 ))}
                             </div>
 
-                            {/* Dynamic Footer (9%) */}
-                            <div className="h-12 shrink-0 bg-slate-900 rounded-[22px] flex items-center justify-between px-6 text-white no-print">
-                                <div className="flex items-center gap-2.5">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 tracking-widest">Dashboard Active</span>
+                            {/* Footer */}
+                            <div className="h-12 shrink-0 bg-slate-900 rounded-[22px] flex items-center justify-between px-6 text-white shadow-xl">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Sync: Active</span>
                                 </div>
-                                <div className="text-right flex items-center gap-3">
+                                <div className="text-right flex items-center gap-4">
                                     <div className="flex flex-col items-end leading-none">
-                                        <span className="text-[13px] font-black text-white uppercase tracking-tighter">{remainingDays} Days</span>
-                                        <span className="text-[7px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">Remaining</span>
+                                        <span className="text-[14px] font-black text-white">{remainingDays} Days</span>
+                                        <span className="text-[8px] font-bold text-slate-400 uppercase mt-1">Remaining</span>
                                     </div>
-                                    <i data-lucide="chevron-right" className="w-3.5 h-3.5 text-slate-500"></i>
+                                    <i data-lucide="chevron-right" className="w-4 h-4 text-slate-500"></i>
                                 </div>
                             </div>
                         </main>
                     )}
+
+                    {/* HIDDEN REPORT AREA FOR PERFECT SCREENSHOTS */}
+                    <div id="report-capture" className="p-6">
+                        <div className="mb-6">
+                            <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight leading-none">{current.title}</h1>
+                            <p className="text-blue-600 text-xs font-black mt-2 uppercase tracking-widest">{current.subTitle} - REPORT DATE: {current.reportDate}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className="bg-white rounded-2xl border p-4">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Pending for Packing</span>
+                                <div className="text-xl font-black text-orange-600 mt-1">{current.pendingVisual.toLocaleString()}</div>
+                            </div>
+                            <div className="bg-slate-900 rounded-2xl p-4 text-white">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Working Days Remaining</span>
+                                <div className="text-xl font-black mt-1">{remainingDays} Days</div>
+                            </div>
+                        </div>
+                        {current.items.map((item, i) => (
+                            <ProductCard key={i} item={item} isReport={true} />
+                        ))}
+                        <div className="mt-4 pt-4 border-t border-slate-200 text-center">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Generated by Production Insight AI</p>
+                        </div>
+                    </div>
                 </div>
             );
         };
